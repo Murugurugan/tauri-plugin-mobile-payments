@@ -37,6 +37,14 @@ class ProductListArgs {
     lateinit var sub: String
 }
 
+@InvokeArg
+class UpdateSubscriptionArgs {
+    lateinit var newProductId: String
+    lateinit var oldPurchaseToken: String
+    lateinit var replacementMode: String
+    var obfuscatedAccountId: String? = null
+}
+
 @TauriPlugin
 class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
     private val implementation = MobilePayments(activity)
@@ -70,33 +78,80 @@ class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
     fun purchase(invoke: Invoke) {
         executeSuspendingVoidCommand(invoke) {
             val args = invoke.parseArgs(PurchaseArgs::class.java)
-            implementation.purchase(args.productId, if (args.isSub.toBoolean()) BillingClient.ProductType.SUBS else BillingClient.ProductType.INAPP, args.obfuscatedAccountId)
+            // Ensure productType is correctly determined (SUBS or INAPP)
+            val productType = if (args.isSub.toBoolean()) BillingClient.ProductType.SUBS else BillingClient.ProductType.INAPP
+            implementation.launchPurchaseFlow(
+                productId = args.productId,
+                productType = productType,
+                obfuscatedAccountId = args.obfuscatedAccountId,
+                updateParams = null // Explicitly null for initial purchase
+            )
+        }
+    }
+
+    @Command
+    fun updateSubscription(invoke: Invoke) { // Command for upgrades/downgrades
+        executeSuspendingVoidCommand(invoke) {
+            val args = invoke.parseArgs(UpdateSubscriptionArgs::class.java)
+
+            // Map the string replacement mode to the BillingClient constant
+            val replacementModeConstant = mapReplacementMode(args.replacementMode)
+
+            val updateParams = BillingFlowParams.SubscriptionUpdateParams.newBuilder()
+                .setOldPurchaseToken(args.oldPurchaseToken)
+                .setReplaceProrationMode(replacementModeConstant) // Use correct method name if API changed slightly, check docs
+                // or .setSubscriptionReplacementMode(replacementModeConstant) - Check Billing Lib version
+                .build()
+
+            // Subscription updates are always for SUBS type
+            implementation.launchPurchaseFlow(
+                productId = args.newProductId,
+                productType = BillingClient.ProductType.SUBS,
+                obfuscatedAccountId = args.obfuscatedAccountId,
+                updateParams = updateParams // Pass the update parameters
+            )
         }
     }
 
     @Command
     fun getProductPrice(invoke: Invoke) {
-        executeSuspendingCommand(invoke) {
+       executeSuspendingCommand(invoke) {
             val args = invoke.parseArgs(ProductListArgs::class.java)
-            val product = implementation.getProductDetails(args.productId, if (args.sub.toBoolean()) BillingClient.ProductType.SUBS else BillingClient.ProductType.INAPP);
+            // Pass the correct product type based on the 'sub' flag
+            val productType = if (args.sub.toBoolean()) BillingClient.ProductType.SUBS else BillingClient.ProductType.INAPP
+            val productDetails = implementation.getProductDetails(args.productId, productType)
 
-            var priceArray: Array<String> = emptyArray();
-            product.zza().subscriptionOfferDetails?.let {
-                it.forEach { offer ->
-                    offer.pricingPhases.pricingPhaseList.forEach { offerPrice ->
-                        priceArray += offerPrice.formattedPrice
-                    }
-                }
-            }
-            product.zza().oneTimePurchaseOfferDetails?.let {
-                priceArray += it.formattedPrice
-            }
+            // --- Refined Price Extraction ---
+            val priceInfo = implementation.extractPriceInfo(productDetails)
 
             return@executeSuspendingCommand JSObject().apply {
-                put("price", priceArray[0])
+                // Return more structured info if needed, e.g., base plan price, offer price
+                put("formattedPrice", priceInfo.formattedPrice) // Keep simple for now
+                put("currencyCode", priceInfo.currencyCode)
+                put("priceAmountMicros", priceInfo.priceAmountMicros)
+                // Potentially add offer details if relevant
             }
         }
     }
+
+
+    private fun mapReplacementMode(mode: String): Int {
+        return when (mode.uppercase()) {
+            // Check exact constant names for your Billing Library version
+            "IMMEDIATE_WITH_TIME_PRORATION" -> BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.IMMEDIATE_WITH_TIME_PRORATION
+            "IMMEDIATE_AND_CHARGE_PRORATED_PRICE" -> BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.IMMEDIATE_AND_CHARGE_PRORATED_PRICE
+            "IMMEDIATE_WITHOUT_PRORATION" -> BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.IMMEDIATE_WITHOUT_PRORATION
+            "DEFERRED" -> BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.DEFERRED
+            "IMMEDIATE_AND_CHARGE_FULL_PRICE" -> BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.IMMEDIATE_AND_CHARGE_FULL_PRICE
+            else -> {
+                // Log an error or throw an exception for unsupported modes
+                System.err.println("Warning: Unsupported replacement mode string '$mode'. Defaulting to DEFERRED.")
+                BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.DEFERRED // Or throw IllegalArgumentException
+            }
+        }
+    }
+
+
 
     private inline fun executeCommand(invoke: Invoke, action: () -> JSObject) {
         try {

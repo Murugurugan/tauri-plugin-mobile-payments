@@ -1,7 +1,5 @@
 use tauri::{AppHandle, command, Runtime};
-use crate::{MobilePaymentsExt, ProductDetail, ProductPriceRequest};
-
-use crate::{PurchaseRequest, Result};
+use crate::{MobilePaymentsExt, ProductDetail, ProductPriceRequest, PurchaseRequest, UpdateSubscriptionRequest, Result};
 
 #[command]
 pub(crate) async fn start_connection<R: Runtime>(app: AppHandle<R>) -> Result<()> {
@@ -16,4 +14,9 @@ pub(crate) async fn purchase<R: Runtime>(app: AppHandle<R>, args: PurchaseReques
 #[command]
 pub(crate) async fn get_product_price<R: Runtime>(app: AppHandle<R>, args: ProductPriceRequest) -> Result<ProductDetail> {
     app.mobile_payments().get_product_price(args).await
+}
+
+#[command]
+pub(crate) async fn update_subscription<R: Runtime>(app: AppHandle<R>, args: UpdateSubscriptionRequest) -> Result<()> {
+    app.mobile_payments().update_subscription(args).await
 }

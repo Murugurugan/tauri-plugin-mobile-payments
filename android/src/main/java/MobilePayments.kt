@@ -12,6 +12,12 @@ import kotlin.coroutines.resume
 @Suppress("unused")
 data class PurchasesUpdatedChannelMessage(val billingResult: BillingResult, val purchases: List<Purchase>)
 
+data class PriceInfo(
+    val formattedPrice: String?,
+    val currencyCode: String?,
+    val priceAmountMicros: Long?
+)
+
 class MobilePayments(private val activity: Activity) {
     private var billingClient: BillingClient? = null
     private var channel: Channel? = null
@@ -56,33 +62,91 @@ class MobilePayments(private val activity: Activity) {
         } ?: throw IllegalStateException("BillingClient not initialized.")
     }
 
-    suspend fun getProductDetails(productId: String, productType: String): BillingFlowParams.ProductDetailsParams {
-        billingClient?.let { client ->
-            val productList =
-                QueryProductDetailsParams.Product.newBuilder().setProductId(productId).setProductType(productType)
-                    .build()
 
-            val params = QueryProductDetailsParams.newBuilder().setProductList(listOf(productList)).build()
 
-            val productsDetails = client.queryProductDetails(params)
+    suspend fun getProductDetails(productId: String, productType: String): ProductDetails {
+        val client = billingClient ?: throw IllegalStateException("BillingClient not initialized.")
 
-            if (productsDetails.billingResult.responseCode != BillingResponseCode.OK) {
-                throw IllegalStateException("Billing response code: ${productsDetails.billingResult.responseCode}")
+        val productList = listOf(
+            QueryProductDetailsParams.Product.newBuilder()
+                .setProductId(productId)
+                .setProductType(productType)
+                .build()
+        )
+        val params = QueryProductDetailsParams.newBuilder().setProductList(productList).build()
+
+        val productDetailsResult = client.queryProductDetails(params)
+
+        if (productDetailsResult.billingResult.responseCode != BillingResponseCode.OK) {
+            throw IllegalStateException("Failed to query product details: ${productDetailsResult.billingResult.debugMessage} (Code: ${productDetailsResult.billingResult.responseCode})")
+        }
+
+        return productDetailsResult.productDetailsList?.firstOrNull { it.productId == productId }
+            ?: throw IllegalStateException("Product details not found for ID: $productId")
+    }
+
+    fun extractPriceInfo(productDetails: ProductDetails): PriceInfo {
+         // For Subscriptions: Prioritize finding the base plan's price or a specific offer's price
+        productDetails.subscriptionOfferDetails?.firstOrNull()?.let { offer ->
+            // Often the first pricing phase is the relevant one for display
+            offer.pricingPhases.pricingPhaseList.firstOrNull()?.let { phase ->
+                return PriceInfo(phase.formattedPrice, phase.priceCurrencyCode, phase.priceAmountMicros)
             }
+        }
 
-            val productDetailsList = productsDetails.productDetailsList?.firstOrNull()
-                ?: throw IllegalStateException("Product details list is empty.")
+        // For One-Time Purchases or fallback for Subs
+        productDetails.oneTimePurchaseOfferDetails?.let { offer ->
+             return PriceInfo(offer.formattedPrice, offer.priceCurrencyCode, offer.priceAmountMicros)
+        }
 
-            val productDetailsBuilder = BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(productDetailsList);
+        // Fallback if no price found (should ideally not happen for valid products)
+        return PriceInfo(null, null, null)
+    }
 
-            if (productType == ProductType.SUBS) {
-                productDetailsList.subscriptionOfferDetails?.firstOrNull()?.offerToken?.let { offerToken ->
-                    productDetailsBuilder.setOfferToken(offerToken)
+
+    // --- Consolidate purchase flow logic ---
+    suspend fun launchPurchaseFlow(
+        productId: String,
+        productType: String,
+        obfuscatedAccountId: String?,
+        updateParams: BillingFlowParams.SubscriptionUpdateParams? // Null for new purchase
+    ): BillingResult {
+        val client = billingClient ?: throw IllegalStateException("BillingClient not initialized.")
+
+        // 1. Get ProductDetails for the product being purchased/updated TO
+        val productDetails = getProductDetails(productId, productType) // Use the refactored method
+
+        // 2. Build ProductDetailsParams (including offer token for SUBS)
+        val productDetailsParams = BillingFlowParams.ProductDetailsParams.newBuilder()
+            .setProductDetails(productDetails)
+            .apply {
+                // Ensure we get the offer token for the *target* subscription plan
+                if (productType == ProductType.SUBS) {
+                    // Find the appropriate offer token. Often the first one or base plan.
+                    // You might need more logic here if you have multiple offers per subscription.
+                    productDetails.subscriptionOfferDetails?.firstOrNull()?.offerToken?.let { offerToken ->
+                        setOfferToken(offerToken)
+                    } ?: run {
+                         // Handle case where subscription details exist but no offer token found (might be an issue)
+                         System.err.println("Warning: No offer token found for subscription product $productId")
+                    }
                 }
             }
+            .build()
 
-            return productDetailsBuilder.build()
-        } ?: throw IllegalStateException("BillingClient not initialized.")
+        // 3. Build BillingFlowParams
+        val billingFlowParamsBuilder = BillingFlowParams.newBuilder()
+            .setProductDetailsParamsList(listOf(productDetailsParams))
+            .apply {
+                obfuscatedAccountId?.let { setObfuscatedAccountId(it) }
+                // Add update parameters ONLY if this is an upgrade/downgrade
+                updateParams?.let { setSubscriptionUpdateParams(it) }
+            }
+
+        val billingFlowParams = billingFlowParamsBuilder.build()
+
+        // 4. Launch Billing Flow
+        return client.launchBillingFlow(activity, billingFlowParams)
     }
 
     suspend fun purchase(productId: String, productType: String, obfuscatedAccountId: String?): BillingResult {

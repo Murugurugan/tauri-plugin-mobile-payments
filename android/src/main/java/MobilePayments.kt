@@ -5,6 +5,8 @@ import app.tauri.plugin.Channel
 import com.android.billingclient.api.*
 import com.android.billingclient.api.BillingClient.BillingResponseCode
 import com.android.billingclient.api.BillingClient.ProductType
+import com.android.billingclient.api.QueryPurchasesParams
+import com.android.billingclient.api.Purchase
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.CancellationException
 import kotlin.coroutines.resume
@@ -60,6 +62,27 @@ class MobilePayments(private val activity: Activity) {
                 })
             }
         } ?: throw IllegalStateException("BillingClient not initialized.")
+    }
+
+
+    suspend fun getActiveSubscriptionPurchaseToken(productId: String): String? {
+        val client = billingClient ?: throw IllegalStateException("BillingClient not initialized.")
+
+        return suspendCancellableCoroutine { continuation ->
+            client.queryPurchasesAsync(
+                QueryPurchasesParams.newBuilder()
+                    .setProductType(BillingClient.ProductType.SUBS)
+                    .build()
+            ) { billingResult, purchasesList ->
+                if (billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
+                    continuation.resumeWith(Result.failure(IllegalStateException("Failed to query purchases: ${billingResult.debugMessage}")))
+                    return@queryPurchasesAsync
+                }
+                // Find the purchase for the given productId
+                val token = purchasesList.firstOrNull { it.products.contains(productId) }?.purchaseToken
+                continuation.resume(token)
+            }
+        }
     }
 
 

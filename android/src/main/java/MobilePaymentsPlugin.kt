@@ -9,6 +9,7 @@ import app.tauri.plugin.Plugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import com.android.billingclient.api.BillingClient
+import com.android.billingclient.api.BillingFlowParams
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -44,6 +45,12 @@ class UpdateSubscriptionArgs {
     lateinit var replacementMode: String
     var obfuscatedAccountId: String? = null
 }
+
+@InvokeArg
+class ActiveSubTokenArgs {
+    lateinit var productId: String
+}
+
 
 @TauriPlugin
 class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
@@ -90,6 +97,15 @@ class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun getActiveSubscriptionPurchaseToken(invoke: Invoke) {
+        executeSuspendingCommand(invoke) {
+            val args = invoke.parseArgs(ActiveSubTokenArgs::class.java)
+            val token = implementation.getActiveSubscriptionPurchaseToken(args.productId)
+            JSObject().apply { put("purchaseToken", token) }
+        }
+    }
+
+    @Command
     fun updateSubscription(invoke: Invoke) { // Command for upgrades/downgrades
         executeSuspendingVoidCommand(invoke) {
             val args = invoke.parseArgs(UpdateSubscriptionArgs::class.java)
@@ -99,8 +115,7 @@ class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
 
             val updateParams = BillingFlowParams.SubscriptionUpdateParams.newBuilder()
                 .setOldPurchaseToken(args.oldPurchaseToken)
-                .setReplaceProrationMode(replacementModeConstant) // Use correct method name if API changed slightly, check docs
-                // or .setSubscriptionReplacementMode(replacementModeConstant) - Check Billing Lib version
+                .setSubscriptionReplacementMode(replacementModeConstant)
                 .build()
 
             // Subscription updates are always for SUBS type
@@ -134,19 +149,29 @@ class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-
     private fun mapReplacementMode(mode: String): Int {
+        // Use the constants available in BillingFlowParams.SubscriptionUpdateParams.ReplacementMode
         return when (mode.uppercase()) {
-            // Check exact constant names for your Billing Library version
-            "IMMEDIATE_WITH_TIME_PRORATION" -> BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.IMMEDIATE_WITH_TIME_PRORATION
-            "IMMEDIATE_AND_CHARGE_PRORATED_PRICE" -> BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.IMMEDIATE_AND_CHARGE_PRORATED_PRICE
-            "IMMEDIATE_WITHOUT_PRORATION" -> BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.IMMEDIATE_WITHOUT_PRORATION
+            // Map the incoming string "IMMEDIATE_WITH_TIME_PRORATION" to the constant WITH_TIME_PRORATION
+            "IMMEDIATE_WITH_TIME_PRORATION" -> BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.WITH_TIME_PRORATION
+
+            // Map "IMMEDIATE_AND_CHARGE_PRORATED_PRICE" to CHARGE_PRORATED_PRICE
+            "IMMEDIATE_AND_CHARGE_PRORATED_PRICE" -> BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.CHARGE_PRORATED_PRICE
+
+            // Map "IMMEDIATE_WITHOUT_PRORATION" to WITHOUT_PRORATION
+            "IMMEDIATE_WITHOUT_PRORATION" -> BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.WITHOUT_PRORATION
+
+            // Map "IMMEDIATE_AND_CHARGE_FULL_PRICE" to CHARGE_FULL_PRICE
+            "IMMEDIATE_AND_CHARGE_FULL_PRICE" -> BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.CHARGE_FULL_PRICE
+
+            // DEFERRED name matches the constant name
             "DEFERRED" -> BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.DEFERRED
-            "IMMEDIATE_AND_CHARGE_FULL_PRICE" -> BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.IMMEDIATE_AND_CHARGE_FULL_PRICE
+
             else -> {
-                // Log an error or throw an exception for unsupported modes
-                System.err.println("Warning: Unsupported replacement mode string '$mode'. Defaulting to DEFERRED.")
-                BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.DEFERRED // Or throw IllegalArgumentException
+                // Log an error or throw an exception for unsupported modes from the frontend
+                System.err.println("Warning: Unsupported replacement mode string '$mode' received. Defaulting to DEFERRED.")
+                // Default to a known valid constant
+                BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.DEFERRED
             }
         }
     }

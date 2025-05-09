@@ -1,7 +1,7 @@
 #![cfg(mobile)]
 
 use tauri::{plugin::{Builder, TauriPlugin}, Manager, Runtime, Emitter};
-use tauri::async_runtime::{spawn_blocking};
+use tauri::async_runtime::spawn_blocking;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::plugin::PluginHandle;
 
@@ -68,6 +68,19 @@ impl<R: Runtime> MobilePayments<R> {
         }).await.map_err(crate::Error::SpawnBlockingError)?
     }
 
+    pub async fn get_active_subscription_purchase_token(&self, product_id: String) -> crate::Result<Option<String>> {
+        spawn_blocking({
+            let app = self.0.clone();
+            let args = serde_json::json!({ "productId": product_id });
+            move || {
+                let res: serde_json::Value = app.run_mobile_plugin("getActiveSubscriptionPurchaseToken", args)?;
+                Ok(res.get("purchaseToken").and_then(|v| v.as_str().map(|s| s.to_string())))
+            }
+        })
+        .await
+        .map_err(crate::Error::SpawnBlockingError)?
+    }
+
     pub async fn get_product_price(&self, payload: ProductPriceRequest) -> crate::Result<ProductDetail> {
         spawn_blocking({
             let app = self.0.clone();
@@ -94,7 +107,7 @@ impl<R: Runtime, T: Manager<R>> crate::MobilePaymentsExt<R> for T {
 /// Initializes the plugin.
 pub fn init<R: Runtime>(args: InitRequest) -> TauriPlugin<R> {
     Builder::new("mobile-payments")
-        .invoke_handler(tauri::generate_handler![commands::start_connection, commands::purchase, commands::get_product_price, commands::update_subscription])
+        .invoke_handler(tauri::generate_handler![commands::start_connection, commands::purchase, commands::get_product_price, commands::update_subscription, commands::get_active_subscription_purchase_token])
         .setup(|app, api| {
             #[cfg(target_os = "android")]
                 let handle = api.register_android_plugin(PLUGIN_IDENTIFIER, "MobilePaymentsPlugin")?;

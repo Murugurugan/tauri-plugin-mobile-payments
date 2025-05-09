@@ -1,5 +1,5 @@
 import {invoke} from "@tauri-apps/api/core";
-import {PaymentEvent, ProductDetail, PurchaseRequest, ProductPriceRequest, UpdateSubscriptionRequest} from "./bindings";
+import {PaymentEvent, ProductDetail, PurchaseRequest, ProductPriceRequest, UpdateSubscriptionRequest, ActiveSubTokenArgs } from "./bindings";
 import {EventCallback, listen, UnlistenFn} from "@tauri-apps/api/event";
 
 export const enum SubscriptionReplacementMode {
@@ -38,8 +38,8 @@ export async function updateSubscription(args: {
     replacementMode?: SubscriptionReplacementMode; // Use the enum/constants
     obfuscatedAccountId?: string;
 }): Promise<void> {
-     // Map the enum/constant to the string expected by Rust/Kotlin
-     const requestArgs: UpdateSubscriptionRequest = {
+    // Map the enum/constant to the string expected by Rust/Kotlin
+    const requestArgs: UpdateSubscriptionRequest = {
         newProductId: args.newProductId,
         oldPurchaseToken: args.oldPurchaseToken,
         // Provide a default if desired, or let Rust handle it
@@ -47,6 +47,14 @@ export async function updateSubscription(args: {
         obfuscatedAccountId: args.obfuscatedAccountId,
     };
     await invoke("plugin:mobile-payments|update_subscription", { args: requestArgs });
+}
+
+export async function getActiveSubscriptionPurchaseToken(productId: string): Promise<string | null> {
+    const result = await invoke<{ purchaseToken: string | null }>(
+        'plugin:mobile-payments|get_active_subscription_purchase_token',
+        { args: { productId } }
+    );
+    return result.purchaseToken ?? null;
 }
 
 export {PurchaseRequest}

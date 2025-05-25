@@ -8,6 +8,7 @@
     "esModuleInterop": true,
     "baseUrl": ".",
     "declaration": true,
+    "emitDeclarationOnly": false,
     "declarationDir": "../webview-dist",
     "outDir": "../webview-dist", // Rollup's output.dir takes precedence for final JS
     "rootDir": ".",

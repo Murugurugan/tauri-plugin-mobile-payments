@@ -295,6 +295,30 @@
       "type": "string",
       "oneOf": [
         {
+          "description": "Enables the check_for_app_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-check-for-app-update",
+          "markdownDescription": "Enables the check_for_app_update command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the check_for_app_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-check-for-app-update",
+          "markdownDescription": "Denies the check_for_app_update command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the complete_flexible_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-complete-flexible-update",
+          "markdownDescription": "Enables the complete_flexible_update command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the complete_flexible_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-complete-flexible-update",
+          "markdownDescription": "Denies the complete_flexible_update command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_product_price command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-product-price",
@@ -317,6 +341,30 @@
           "type": "string",
           "const": "deny-purchase",
           "markdownDescription": "Denies the purchase command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_update_event_handler command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-update-event-handler",
+          "markdownDescription": "Enables the set_update_event_handler command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_update_event_handler command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-update-event-handler",
+          "markdownDescription": "Denies the set_update_event_handler command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_app_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-app-update",
+          "markdownDescription": "Enables the start_app_update command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_app_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-app-update",
+          "markdownDescription": "Denies the start_app_update command without any pre-configured scope."
         },
         {
           "description": "Enables the start_connection command without any pre-configured scope.",
@@ -343,10 +391,10 @@
           "markdownDescription": "Denies the update_subscription command without any pre-configured scope."
         },
         {
-          "description": "Allows initiating payments and starting connections to google payments services\n#### This default permission set includes:\n\n- `allow-start-connection`\n- `allow-purchase`",
+          "description": "Allows initiating payments and starting connections to google payments services\n#### This default permission set includes:\n\n- `allow-start-connection`\n- `allow-purchase`\n- `allow-start-app-update`\n- `allow-set-update-event-handler`\n- `allow-complete-flexible-update`\n- `allow-check-for-app-update`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Allows initiating payments and starting connections to google payments services\n#### This default permission set includes:\n\n- `allow-start-connection`\n- `allow-purchase`"
+          "markdownDescription": "Allows initiating payments and starting connections to google payments services\n#### This default permission set includes:\n\n- `allow-start-connection`\n- `allow-purchase`\n- `allow-start-app-update`\n- `allow-set-update-event-handler`\n- `allow-complete-flexible-update`\n- `allow-check-for-app-update`"
         }
       ]
     }

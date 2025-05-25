@@ -1,5 +1,7 @@
-import {invoke} from "@tauri-apps/api/core";
+import {invoke, Channel} from "@tauri-apps/api/core";
 import {PaymentEvent, ProductDetail, PurchaseRequest, ProductPriceRequest, UpdateSubscriptionRequest, ActiveSubTokenArgs } from "./bindings";
+import type { UpdateType as UpdateTypeT, UpdateProgress, UpdateCheck } from "./bindings";
+
 import {EventCallback, listen, UnlistenFn} from "@tauri-apps/api/event";
 
 export const enum SubscriptionReplacementMode {
@@ -57,4 +59,92 @@ export async function getActiveSubscriptionPurchaseToken(productId: string): Pro
     return result.purchaseToken ?? null;
 }
 
+/** Runtime constants that mirror the union type. */
+// export const UpdateTypes = {
+//     IMMEDIATE: "IMMEDIATE",
+//     FLEXIBLE:  "FLEXIBLE",
+// } as const satisfies Record<UpdateType, UpdateType>;
+
+// export const UpdateType = {
+//     IMMEDIATE: "IMMEDIATE",
+//     FLEXIBLE:  "FLEXIBLE",
+// } as const;
+
+/** Ask Play Core whether an update is available & allowed */
+export function checkForAppUpdate(
+    updateType: UpdateType = UpdateType.IMMEDIATE   // ✅ enum member
+): Promise<UpdateCheck> {
+    return invoke("plugin:mobile-payments|check_for_app_update", {
+        args: { updateType },
+    });
+}
+
+export function startAppUpdate(
+    updateType: UpdateType = UpdateType.IMMEDIATE   // ✅ enum member
+): Promise<void> {
+    return invoke("plugin:mobile-payments|start_app_update", {
+        args: { updateType },
+    });
+}
+
+/** Call this after a FLEXIBLE download finishes to restart / install */
+export async function completeFlexibleUpdate(): Promise<void> {
+    await invoke("plugin:mobile-payments|complete_flexible_update");
+}
+
+/**
+ * Listen for every native update-status change (progress bytes + status code).
+ * The channel name mirrors what you used for purchases.
+ *
+ * Be sure to hold on to the returned `UnlistenFn` and call it in `onUnmount`.
+ */
+export function listenForUpdateEvents(
+    handler: EventCallback<UpdateProgress | Record<string, unknown>>,
+): Promise<UnlistenFn> {
+    /* the channel is emitted from Kotlin’s `updates.setChannel()`              *
+    * and is identical to how you broadcast purchase events:                  */
+    return listen("mobile-payments://update", handler);
+}
+
+// export function createChannel<T>(
+//     callback: (payload: T) => void
+// ): Promise<Channel<T>>
+
+
+/**
+ * Register a callback that receives every progress / status message
+ * sent from the Kotlin `updates.setChannel().sendObject(...)`.
+ *
+ * The function returns an `unlisten()` you should call on shutdown.
+ */
+export async function registerUpdateEventHandler(
+    callback: (data: UpdateProgress | Record<string, unknown>) => void
+): Promise<() => void> {
+    // 1️⃣  Create a JS-side channel bound to your callback
+    const chan = new Channel(callback);
+
+    // 2️⃣  Give the channel object itself to Kotlin/Rust
+    await invoke("plugin:mobile-payments|set_update_event_handler", {
+        handler: chan             // <-- just pass the Channel
+    });
+
+    // 3️⃣  Return a simple disposer
+    return () => {
+        // you can swap to a noop to stop receiving messages
+        chan.onmessage = () => {};
+    };
+}
+
+export const UpdateType = {
+    IMMEDIATE: "IMMEDIATE",
+    FLEXIBLE:  "FLEXIBLE",
+} as const satisfies Record<UpdateTypeT, UpdateTypeT>;
+
+export type UpdateType = UpdateTypeT;
+
+
 export {PurchaseRequest}
+
+export type { UpdateProgress, UpdateCheck } from "./bindings";
+
+// export { UpdateType } from "./bindings";

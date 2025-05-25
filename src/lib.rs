@@ -91,6 +91,41 @@ impl<R: Runtime> MobilePayments<R> {
             }
         }).await.map_err(crate::Error::SpawnBlockingError)?
     }
+
+
+    pub async fn set_update_event_handler(&self, handler: Channel) -> crate::Result<()> {
+        spawn_blocking({
+            let app = self.0.clone();
+            move || app.run_mobile_plugin("setUpdateEventHandler", crate::models::SetEventHandlerArgs { handler })
+                    .map_err(Into::into)
+        }).await.map_err(crate::Error::SpawnBlockingError)?
+    }
+
+    pub async fn check_for_app_update(&self, args: UpdateCheckArgs) -> crate::Result<UpdateCheck> {
+        spawn_blocking({
+            let app = self.0.clone();
+            move || app.run_mobile_plugin("checkForAppUpdate", args)
+                    .map_err(Into::into)
+        }).await.map_err(crate::Error::SpawnBlockingError)?
+    }
+
+    pub async fn start_app_update(&self, args: UpdateCheckArgs) -> crate::Result<()> {
+        spawn_blocking({
+            let app = self.0.clone();
+            move || app.run_mobile_plugin("startAppUpdate", args)
+                    .map_err(Into::into)
+        }).await.map_err(crate::Error::SpawnBlockingError)?
+    }
+
+    pub async fn complete_flexible_update(&self) -> crate::Result<()> {
+        spawn_blocking({
+            let app = self.0.clone();
+            move || app.run_mobile_plugin::<()>("completeFlexibleUpdate", ())
+                    .map_err(Into::into)
+        }).await.map_err(crate::Error::SpawnBlockingError)?
+    }
+
+
 }
 
 /// Extensions to [`tauri::App`], [`tauri::AppHandle`] and [`tauri::Window`] to access the mobile-payments APIs.
@@ -107,7 +142,7 @@ impl<R: Runtime, T: Manager<R>> crate::MobilePaymentsExt<R> for T {
 /// Initializes the plugin.
 pub fn init<R: Runtime>(args: InitRequest) -> TauriPlugin<R> {
     Builder::new("mobile-payments")
-        .invoke_handler(tauri::generate_handler![commands::start_connection, commands::purchase, commands::get_product_price, commands::update_subscription, commands::get_active_subscription_purchase_token])
+        .invoke_handler(tauri::generate_handler![commands::start_connection, commands::purchase, commands::get_product_price, commands::update_subscription, commands::get_active_subscription_purchase_token, commands::set_update_event_handler, commands::check_for_app_update, commands::start_app_update, commands::complete_flexible_update])
         .setup(|app, api| {
             #[cfg(target_os = "android")]
                 let handle = api.register_android_plugin(PLUGIN_IDENTIFIER, "MobilePaymentsPlugin")?;
@@ -132,9 +167,28 @@ pub fn init<R: Runtime>(args: InitRequest) -> TauriPlugin<R> {
                 })
                 .expect("failed to set event handler");
 
+            /* ---------- update events (NEW) ---------- */
+            handle.run_mobile_plugin::<()>("setUpdateEventHandler", SetEventHandlerArgs {
+                handler: Channel::new({
+                    let app = app.clone();
+                    move |event| {
+                        let tauri::ipc::InvokeResponseBody::Json(json) = event else {
+                            return Err(anyhow::anyhow!("invalid event").into());
+                        };
+                        let _ = app.emit("mobile-payments://update", json);
+                        Ok(())
+                    }
+                })
+            })?;
+
+
             handle
                 .run_mobile_plugin::<()>("init", args)
                 .expect("failed to initialize mobile-payments plugin");
+
+
+
+
 
             app.manage(MobilePayments(handle));
 

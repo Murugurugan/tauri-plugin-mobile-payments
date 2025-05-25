@@ -3,6 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+repositories { google(); mavenCentral() }
+
 android {
     namespace = "codes.dreaming.plugin.mobile_payments"
     compileSdk = 34
@@ -36,7 +38,10 @@ android {
 
 dependencies {
     implementation("com.android.billingclient:billing-ktx:7.1.1")
-    implementation("androidx.core:core-ktx:1.9.0")
+    implementation("com.google.android.play:app-update:2.1.0")
+    implementation("com.google.android.play:app-update-ktx:2.1.0")
+    implementation("androidx.activity:activity-ktx:1.9.0")
+    implementation("androidx.core:core-ktx:1.13.0")
     implementation("androidx.appcompat:appcompat:1.6.0")
     implementation("com.google.android.material:material:1.11.0")
     testImplementation("junit:junit:4.13.2")

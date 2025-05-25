@@ -16,6 +16,7 @@ export default {
     typescript({ // Run TypeScript compilation first
       tsconfig: './webview-src/tsconfig.json',
       moduleResolution: 'node',
+      useTsconfigDeclarationDir: true,
       clean: true // Optional: clean cache on rebuild
     }),
     terser() // Run Terser minification last on the generated JavaScript

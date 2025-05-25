@@ -20,6 +20,27 @@ data class PriceInfo(
     val priceAmountMicros: Long?
 )
 
+private data class PurchaseWire(
+    val orderId:        String?,
+    val packageName:    String?,
+    val products:       List<String>,
+    val purchaseToken:  String,
+    val purchaseTime:   Long,
+    val acknowledged:   Boolean,
+    val originalJson:   String
+)
+
+private fun Purchase.toWire() = PurchaseWire(
+    orderId,
+    packageName,
+    products,
+    purchaseToken,
+    purchaseTime,
+    isAcknowledged,
+    originalJson
+)
+
+
 class MobilePayments(private val activity: Activity) {
     private var billingClient: BillingClient? = null
     private var channel: Channel? = null
@@ -31,7 +52,15 @@ class MobilePayments(private val activity: Activity) {
 
         billingClient = BillingClient.newBuilder(activity).apply {
             setListener { billingResult, purchases ->
-                channel?.sendObject(PurchasesUpdatedChannelMessage(billingResult, purchases.orEmpty()))
+                channel?.sendObject(
+                    mapOf(
+                        "billingResult" to mapOf(
+                            "responseCode" to billingResult.responseCode,
+                            "debugMessage" to billingResult.debugMessage
+                        ),
+                        "purchases" to purchases.orEmpty().map { it.toWire() }
+                    )
+                )
             }
             enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())
             if (enableAlternativeBillingOnly) {

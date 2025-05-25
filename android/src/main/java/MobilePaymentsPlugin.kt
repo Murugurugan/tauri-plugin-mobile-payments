@@ -8,12 +8,30 @@ import app.tauri.plugin.Channel
 import app.tauri.plugin.Plugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
+import com.google.android.play.core.install.model.AppUpdateType   // ⬅ add
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingFlowParams
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
+
+@InvokeArg
+class UpdateCheckArgs {
+    /** "IMMEDIATE" or "FLEXIBLE" (default IMMEDIATE) */
+    var updateType: String = "IMMEDIATE"
+}
+
+@InvokeArg
+class SetUpdateHandlerArgs { lateinit var handler: Channel }
+
+/** JSON payload delivered through the update channel */
+@Suppress("unused")
+data class UpdateStateMessage(
+    val status: Int,                 // com.google.android.play.core.install.InstallStatus
+    val bytesDownloaded: Long,
+    val totalBytes: Long
+)
 
 @InvokeArg
 class InitArgs {
@@ -55,6 +73,73 @@ class ActiveSubTokenArgs {
 @TauriPlugin
 class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
     private val implementation = MobilePayments(activity)
+    private val updates = InAppUpdates(activity)
+
+
+
+    @Command
+    fun setUpdateEventHandler(invoke: Invoke) = executeVoidCommand(invoke) {
+        val args = invoke.parseArgs(SetUpdateHandlerArgs::class.java)
+        updates.setChannel(args.handler)
+        updates.registerProgressListener()
+    }
+
+    @Command
+    fun checkForAppUpdate(invoke: Invoke) = executeSuspendingCommand(invoke) {
+        val args = invoke.parseArgs(UpdateCheckArgs::class.java)
+        val type = if (args.updateType.equals("FLEXIBLE", true))
+            AppUpdateType.FLEXIBLE else AppUpdateType.IMMEDIATE
+
+        val info = updates.check(type)
+
+        if (info == null) {
+            // No update → send a minimal object; JS can exit quietly.
+            JSObject().apply { put("updateAvailable", false) }
+        } else {
+            JSObject().apply {
+                put("updateAvailable", true)
+                put("availableVersionCode", info.availableVersionCode())
+                put("stalenessDays", info.clientVersionStalenessDays())
+                put("priority", info.updatePriority())
+                put("isImmediateAllowed", info.isUpdateTypeAllowed(AppUpdateType.IMMEDIATE))
+                put("isFlexibleAllowed",  info.isUpdateTypeAllowed(AppUpdateType.FLEXIBLE))
+            }
+        }
+    }
+
+
+
+    @Command
+    fun startAppUpdate(invoke: Invoke) = executeSuspendingVoidCommand(invoke) {   // ⬅ was executeVoidCommand
+        val args = invoke.parseArgs(UpdateCheckArgs::class.java)
+        val type =
+            if (args.updateType.equals("FLEXIBLE", true)) AppUpdateType.FLEXIBLE
+            else AppUpdateType.IMMEDIATE
+
+        val info = updates.check(type)
+            ?: throw IllegalStateException("No suitable update available")
+        updates.start(info, type)
+    }
+
+
+    @Command
+    fun completeFlexibleUpdate(invoke: Invoke) = executeVoidCommand(invoke) {
+        updates.completeFlexible()
+    }
+
+
+    // override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+    //     updates.onActivityResult(requestCode, resultCode, data)
+    //     return super.onActivityResult(requestCode, resultCode, data)
+    // }
+
+    override fun onResume() {
+        super.onResume()
+        updates.onResume()
+    }
+
+
+
 
     @Command
     fun init(invoke: Invoke) {

@@ -5,7 +5,7 @@
   "description": "",
   "browser": "webview-dist/index.js",
   "main": "webview-dist/index.js",
-  "types": "webview-dist/webview-src/index.d.ts",
+  "types": "webview-dist/index.d.ts",
   "scripts": {
     "build": "tsync -i ./src -o webview-src/bindings.ts && rollup -c ./webview-src/rollup.config.js",
     "prepublishOnly": "bun run build",
@@ -24,6 +24,6 @@
     "rollup": "2.75.6",
     "rollup-plugin-typescript2": "^0.36.0",
     "tslib": "^2.7.0",
-    "typescript": "4.7.3"
+    "typescript": "5.8.3"
   }
 }

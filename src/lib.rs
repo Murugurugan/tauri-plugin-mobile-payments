@@ -4,6 +4,7 @@ use tauri::{plugin::{Builder, TauriPlugin}, Manager, Runtime, Emitter};
 use tauri::async_runtime::spawn_blocking;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::plugin::PluginHandle;
+use crate::models::{IntegrityTokenArgs}; 
 
 pub use models::*;
 
@@ -12,6 +13,9 @@ mod error;
 mod models;
 
 pub use error::{Error, Result};
+use serde::Deserialize;
+
+
 
 #[cfg(target_os = "android")]
 const PLUGIN_IDENTIFIER: &str = "codes.dreaming.plugin.mobile_payments";
@@ -22,12 +26,35 @@ tauri::ios_plugin_binding!(init_plugin_mobile-payments);
 /// Access to the mobile-payments APIs.
 pub struct MobilePayments<R: Runtime>(PluginHandle<R>);
 
+
+#[derive(Deserialize)]
+struct IntegrityResponse {
+    token: String,
+}
+
+
 impl<R: Runtime> MobilePayments<R> {
+
     pub fn destroy(&self) -> crate::Result<()> {
         self
             .0
             .run_mobile_plugin("destroy", ())
             .map_err(Into::into)
+    }
+
+    pub async fn get_integrity_token(&self, nonce: String) -> crate::Result<String> {
+        spawn_blocking({
+            let app = self.0.clone();
+            let args = IntegrityTokenArgs { nonce };
+            move || {
+                // 2. Deserialize the JSObject into our struct
+                let res: IntegrityResponse = app.run_mobile_plugin("getIntegrityToken", args)?;
+                
+                // 3. Return just the string token
+                Ok(res.token)
+            }
+        })
+        .await?
     }
 
     pub async fn start_connection(&self) -> crate::Result<()> {
@@ -38,7 +65,7 @@ impl<R: Runtime> MobilePayments<R> {
                     .run_mobile_plugin("startConnection", ())
                     .map_err(Into::into)
             }
-        }).await.map_err(crate::Error::SpawnBlockingError)?
+        }).await?
     }
 
     pub async fn purchase(&self, payload: PurchaseRequest) -> crate::Result<()> {
@@ -49,7 +76,7 @@ impl<R: Runtime> MobilePayments<R> {
                     .run_mobile_plugin("purchase", payload)
                     .map_err(Into::into)
             }
-        }).await.map_err(crate::Error::SpawnBlockingError)?
+        }).await?
     }
 
     pub async fn update_subscription(&self, payload: UpdateSubscriptionRequest) -> crate::Result<()> {
@@ -65,7 +92,7 @@ impl<R: Runtime> MobilePayments<R> {
                     .run_mobile_plugin("updateSubscription", payload_with_default) // Calls the 'updateSubscription' command in Kotlin
                     .map_err(Into::into)
             }
-        }).await.map_err(crate::Error::SpawnBlockingError)?
+        }).await?
     }
 
     pub async fn get_active_subscription_purchase_token(&self, product_id: String) -> crate::Result<Option<String>> {
@@ -77,8 +104,7 @@ impl<R: Runtime> MobilePayments<R> {
                 Ok(res.get("purchaseToken").and_then(|v| v.as_str().map(|s| s.to_string())))
             }
         })
-        .await
-        .map_err(crate::Error::SpawnBlockingError)?
+        .await?
     }
 
     pub async fn get_product_price(&self, payload: ProductPriceRequest) -> crate::Result<ProductDetail> {
@@ -89,7 +115,7 @@ impl<R: Runtime> MobilePayments<R> {
                     .run_mobile_plugin("getProductPrice", payload)
                     .map_err(Into::into)
             }
-        }).await.map_err(crate::Error::SpawnBlockingError)?
+        }).await?
     }
 
 
@@ -98,7 +124,7 @@ impl<R: Runtime> MobilePayments<R> {
             let app = self.0.clone();
             move || app.run_mobile_plugin("setUpdateEventHandler", crate::models::SetEventHandlerArgs { handler })
                     .map_err(Into::into)
-        }).await.map_err(crate::Error::SpawnBlockingError)?
+        }).await?
     }
 
     pub async fn check_for_app_update(&self, args: UpdateCheckArgs) -> crate::Result<UpdateCheck> {
@@ -106,7 +132,7 @@ impl<R: Runtime> MobilePayments<R> {
             let app = self.0.clone();
             move || app.run_mobile_plugin("checkForAppUpdate", args)
                     .map_err(Into::into)
-        }).await.map_err(crate::Error::SpawnBlockingError)?
+        }).await?
     }
 
     pub async fn start_app_update(&self, args: UpdateCheckArgs) -> crate::Result<()> {
@@ -114,7 +140,7 @@ impl<R: Runtime> MobilePayments<R> {
             let app = self.0.clone();
             move || app.run_mobile_plugin("startAppUpdate", args)
                     .map_err(Into::into)
-        }).await.map_err(crate::Error::SpawnBlockingError)?
+        }).await?
     }
 
     pub async fn complete_flexible_update(&self) -> crate::Result<()> {
@@ -122,10 +148,21 @@ impl<R: Runtime> MobilePayments<R> {
             let app = self.0.clone();
             move || app.run_mobile_plugin::<()>("completeFlexibleUpdate", ())
                     .map_err(Into::into)
-        }).await.map_err(crate::Error::SpawnBlockingError)?
+        }).await?
     }
 
 
+    pub async fn set_fullscreen(&self, args: SetFullscreenArgs) -> crate::Result<()> {
+        spawn_blocking({
+            let app = self.0.clone();
+            move || {
+                app
+                    // This matches the @Command function name in Kotlin
+                    .run_mobile_plugin("setFullscreen", args) 
+                    .map_err(Into::into)
+            }
+        }).await?
+    }
 }
 
 /// Extensions to [`tauri::App`], [`tauri::AppHandle`] and [`tauri::Window`] to access the mobile-payments APIs.
@@ -142,7 +179,7 @@ impl<R: Runtime, T: Manager<R>> crate::MobilePaymentsExt<R> for T {
 /// Initializes the plugin.
 pub fn init<R: Runtime>(args: InitRequest) -> TauriPlugin<R> {
     Builder::new("mobile-payments")
-        .invoke_handler(tauri::generate_handler![commands::start_connection, commands::purchase, commands::get_product_price, commands::update_subscription, commands::get_active_subscription_purchase_token, commands::set_update_event_handler, commands::check_for_app_update, commands::start_app_update, commands::complete_flexible_update])
+        .invoke_handler(tauri::generate_handler![commands::start_connection, commands::purchase, commands::get_product_price, commands::update_subscription, commands::get_active_subscription_purchase_token, commands::set_update_event_handler, commands::check_for_app_update, commands::start_app_update, commands::complete_flexible_update, commands::set_fullscreen, commands::get_auth_payload])
         .setup(|app, api| {
             #[cfg(target_os = "android")]
                 let handle = api.register_android_plugin(PLUGIN_IDENTIFIER, "MobilePaymentsPlugin")?;

@@ -1,8 +1,9 @@
 import {invoke, Channel} from "@tauri-apps/api/core";
-import {PaymentEvent, ProductDetail, PurchaseRequest, ProductPriceRequest, UpdateSubscriptionRequest, ActiveSubTokenArgs } from "./bindings";
+import {PaymentEvent, ProductDetail, PurchaseRequest, ProductPriceRequest, UpdateSubscriptionRequest, AuthPayload, ActiveSubTokenArgs } from "./bindings";
 import type { UpdateType as UpdateTypeT, UpdateProgress, UpdateCheck } from "./bindings";
 
 import {EventCallback, listen, UnlistenFn} from "@tauri-apps/api/event";
+
 
 export const enum SubscriptionReplacementMode {
     /** The replacement takes effect immediately, and the remaining time will be prorated and credited to the user. */
@@ -17,6 +18,28 @@ export const enum SubscriptionReplacementMode {
     DEFERRED = "DEFERRED",
 }
 
+
+export async function getSecureIdentity(): Promise<AuthPayload> {
+    // 1. Call your Rust command to get the UUID/Nonce
+    const rustPayload = await invoke<{platform: string, device_id: string, nonce?: string}>('plugin:identity|get_auth_payload');
+
+    let token = null;
+
+    // 2. If Rust says we are on Android, call the Kotlin command
+    if (rustPayload.platform === "android" && rustPayload.nonce) {
+        // Notice we call the Kotlin function `getIntegrityToken` defined in IdentityPlugin.kt
+        token = await invoke<string>('plugin:identity|getIntegrityToken', { 
+            nonce: rustPayload.nonce 
+        });
+    }
+
+    // 3. Return the unified payload to Svelte
+    return {
+        platform: rustPayload.platform,
+        deviceId: rustPayload.device_id,
+        integrityToken: token
+    };
+}
 
 export async function startConnection() {
     await invoke('plugin:mobile-payments|start_connection', {})

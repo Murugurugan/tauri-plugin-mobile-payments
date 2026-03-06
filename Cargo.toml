@@ -9,13 +9,21 @@ exclude = ["/examples", "/webview-dist", "/webview-src", "/node_modules"]
 links = "tauri-plugin-mobile-payments"
 
 [dependencies]
-tauri = { version = "2.5.1" }
+tauri = { version = "2.10.3" }
 serde = "1.0"
 thiserror = "1.0"
 log = "0.4.20"
-tsync = "2.2.1"
+tsync = "3.1.0"
 anyhow = "1.0.79"
 serde_json = "1.0.117"
+uuid = { version = "1.22.0", features = ["v4"] }
+sha2 = "0.11.0-rc.5"
+base64 = "0.22.1"
 
 [build-dependencies]
-tauri-plugin = { version = "2.2.0", features = ["build"] }
+tauri-plugin = { version = "2.5.4", features = ["build"] }
+
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+machine-uid = "0.5.4"
+keyring = "2.3.3"

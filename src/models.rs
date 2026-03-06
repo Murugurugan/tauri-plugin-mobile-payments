@@ -1,6 +1,23 @@
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tsync::tsync;
+use uuid::Uuid;
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[tsync]
+pub struct IntegrityTokenArgs {
+  pub nonce: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[tsync]
+pub struct AuthPayload {
+  pub platform: String,
+  pub device_id: String,
+  pub integrity_token: Option<String>,
+}
 
 #[derive(Serialize)]
 pub(super) struct SetEventHandlerArgs {
@@ -13,7 +30,8 @@ pub(super) struct SetEventHandlerArgs {
 pub struct PurchaseRequest {
   pub product_id: String,
   pub is_sub: bool,
-  pub obfuscated_account_id: Option<String>
+  pub obfuscated_account_id: Option<String>,
+  pub offer_id: Option<String>
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,7 +50,8 @@ pub struct UpdateSubscriptionRequest {
 #[tsync]
 pub struct ProductPriceRequest {
   pub product_id: String,
-  pub sub: bool
+  pub sub: bool,
+  pub offer_id: Option<String>
 }
 
 #[derive(Serialize)]
@@ -61,12 +80,11 @@ struct AccountIdentifiers {
 #[tsync]
 pub struct ProductDetail {
   pub formatted_price: Option<String>,
+  pub formatted_full_price: Option<String>,
   pub currency_code: Option<String>,
   // #[tsync(optional)] // Mark as optional in TS
   pub price_amount_micros: Option<i64>, // Use i64 for micros
-  // Add other fields if needed (e.g., offer details)
 }
-
 
 
 #[derive(Serialize, Deserialize)]
@@ -148,4 +166,12 @@ pub struct UpdateCheck {
   pub priority:           Option<i32>,
   pub is_immediate_allowed: Option<bool>,
   pub is_flexible_allowed:  Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[tsync]
+pub struct SetFullscreenArgs {
+  pub hide_status_bar: bool,
+  pub hide_navigation_bar: bool,
 }

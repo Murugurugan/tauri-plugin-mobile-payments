@@ -15,6 +15,13 @@ import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CompletableDeferred
+
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+
+
 
 @InvokeArg
 class UpdateCheckArgs {
@@ -39,10 +46,17 @@ class InitArgs {
 }
 
 @InvokeArg
+class FullscreenArgs {
+    var hideStatusBar: Boolean = false
+    var hideNavigationBar: Boolean = false
+}
+
+@InvokeArg
 class PurchaseArgs {
     lateinit var productId: String
     lateinit var isSub: String
     var obfuscatedAccountId: String? = null
+    var offerId: String? = null
 }
 
 @InvokeArg
@@ -54,6 +68,7 @@ class SetEventHandlerArgs {
 class ProductListArgs {
     lateinit var productId: String
     lateinit var sub: String
+    var offerId: String? = null
 }
 
 @InvokeArg
@@ -76,6 +91,35 @@ class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
     private val updates = InAppUpdates(activity)
 
 
+    @Command
+    fun setFullscreen(invoke: Invoke) {
+        executeVoidCommand(invoke) {
+            val args = invoke.parseArgs(FullscreenArgs::class.java)
+
+            activity.runOnUiThread {
+                val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                
+                // 1. Handle Status Bar (Top)
+                if (args.hideStatusBar) {
+                    controller.hide(WindowInsetsCompat.Type.statusBars())
+                } else {
+                    controller.show(WindowInsetsCompat.Type.statusBars())
+                }
+
+                // 2. Handle Navigation Bar (Bottom)
+                if (args.hideNavigationBar) {
+                    controller.hide(WindowInsetsCompat.Type.navigationBars())
+                } else {
+                    controller.show(WindowInsetsCompat.Type.navigationBars())
+                }
+
+                // Apply behavior if EITHER is hidden
+                if (args.hideStatusBar || args.hideNavigationBar) {
+                    controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+            }
+        }
+    }
 
     @Command
     fun setUpdateEventHandler(invoke: Invoke) = executeVoidCommand(invoke) {
@@ -110,7 +154,7 @@ class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
 
 
     @Command
-    fun startAppUpdate(invoke: Invoke) = executeSuspendingVoidCommand(invoke) {   // ⬅ was executeVoidCommand
+    fun startAppUpdate(invoke: Invoke) = executeSuspendingVoidCommand(invoke) {
         val args = invoke.parseArgs(UpdateCheckArgs::class.java)
         val type =
             if (args.updateType.equals("FLEXIBLE", true)) AppUpdateType.FLEXIBLE
@@ -118,7 +162,18 @@ class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
 
         val info = updates.check(type)
             ?: throw IllegalStateException("No suitable update available")
-        updates.start(info, type)
+
+        // Bridge to the UI thread and wait for it
+        val result = CompletableDeferred<Unit>()
+        activity.runOnUiThread {
+            try {
+                updates.start(info, type)
+                result.complete(Unit)
+            } catch (e: Exception) {
+                result.completeExceptionally(e)
+            }
+        }
+        result.await()   // suspends until the UI thread finishes
     }
 
 
@@ -128,10 +183,6 @@ class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
 
-    // override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
-    //     updates.onActivityResult(requestCode, resultCode, data)
-    //     return super.onActivityResult(requestCode, resultCode, data)
-    // }
 
     override fun onResume() {
         super.onResume()
@@ -176,7 +227,8 @@ class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
                 productId = args.productId,
                 productType = productType,
                 obfuscatedAccountId = args.obfuscatedAccountId,
-                updateParams = null // Explicitly null for initial purchase
+                updateParams = null,
+                offerId = args.offerId
             )
         }
     }
@@ -217,19 +269,16 @@ class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
     fun getProductPrice(invoke: Invoke) {
        executeSuspendingCommand(invoke) {
             val args = invoke.parseArgs(ProductListArgs::class.java)
-            // Pass the correct product type based on the 'sub' flag
             val productType = if (args.sub.toBoolean()) BillingClient.ProductType.SUBS else BillingClient.ProductType.INAPP
             val productDetails = implementation.getProductDetails(args.productId, productType)
 
-            // --- Refined Price Extraction ---
-            val priceInfo = implementation.extractPriceInfo(productDetails)
+            val priceInfo = implementation.extractPriceInfo(productDetails, args.offerId) 
 
             return@executeSuspendingCommand JSObject().apply {
-                // Return more structured info if needed, e.g., base plan price, offer price
-                put("formattedPrice", priceInfo.formattedPrice) // Keep simple for now
+                put("formattedPrice", priceInfo.formattedPrice)
+                put("formattedFullPrice", priceInfo.formattedFullPrice)
                 put("currencyCode", priceInfo.currencyCode)
                 put("priceAmountMicros", priceInfo.priceAmountMicros)
-                // Potentially add offer details if relevant
             }
         }
     }

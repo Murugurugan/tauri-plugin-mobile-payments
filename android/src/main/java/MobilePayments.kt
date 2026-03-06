@@ -16,6 +16,7 @@ data class PurchasesUpdatedChannelMessage(val billingResult: BillingResult, val 
 
 data class PriceInfo(
     val formattedPrice: String?,
+    val formattedFullPrice: String?,
     val currencyCode: String?,
     val priceAmountMicros: Long?
 )
@@ -137,31 +138,57 @@ class MobilePayments(private val activity: Activity) {
             ?: throw IllegalStateException("Product details not found for ID: $productId")
     }
 
-    fun extractPriceInfo(productDetails: ProductDetails): PriceInfo {
-         // For Subscriptions: Prioritize finding the base plan's price or a specific offer's price
-        productDetails.subscriptionOfferDetails?.firstOrNull()?.let { offer ->
-            // Often the first pricing phase is the relevant one for display
-            offer.pricingPhases.pricingPhaseList.firstOrNull()?.let { phase ->
-                return PriceInfo(phase.formattedPrice, phase.priceCurrencyCode, phase.priceAmountMicros)
+    fun extractPriceInfo(productDetails: ProductDetails, offerId: String? = null): PriceInfo {
+        // For Subscriptions
+        productDetails.subscriptionOfferDetails?.let { offers ->
+            
+            val targetOffer = if (offerId != null) {
+                // FIX: Throw an error if the specific offer requested is not found
+                offers.firstOrNull { it.offerId == offerId }
+                    ?: throw IllegalStateException("Offer ID '$offerId' not found or ineligible for product ${productDetails.productId}")
+            } else {
+                offers.firstOrNull { it.offerId == null } ?: offers.firstOrNull()
+            }
+
+            targetOffer?.let { offer ->
+                val phases = offer.pricingPhases.pricingPhaseList
+                
+                val firstPhase = phases.firstOrNull()
+                val lastPhase = phases.lastOrNull()
+
+                if (firstPhase != null) {
+                    var fullPrice: String? = null
+
+                    if (lastPhase != null && lastPhase.priceAmountMicros > firstPhase.priceAmountMicros) {
+                        fullPrice = lastPhase.formattedPrice
+                    }
+
+                    return PriceInfo(
+                        firstPhase.formattedPrice, 
+                        fullPrice, 
+                        firstPhase.priceCurrencyCode, 
+                        firstPhase.priceAmountMicros
+                    )
+                }
             }
         }
 
-        // For One-Time Purchases or fallback for Subs
+        // For One-Time Purchases
         productDetails.oneTimePurchaseOfferDetails?.let { offer ->
-             return PriceInfo(offer.formattedPrice, offer.priceCurrencyCode, offer.priceAmountMicros)
+             return PriceInfo(offer.formattedPrice, null, offer.priceCurrencyCode, offer.priceAmountMicros)
         }
 
-        // Fallback if no price found (should ideally not happen for valid products)
-        return PriceInfo(null, null, null)
+        // FIX: If it gets here and was looking for a sub, it failed.
+        throw IllegalStateException("Failed to extract price info for ${productDetails.productId}")
     }
-
 
     // --- Consolidate purchase flow logic ---
     suspend fun launchPurchaseFlow(
         productId: String,
         productType: String,
         obfuscatedAccountId: String?,
-        updateParams: BillingFlowParams.SubscriptionUpdateParams? // Null for new purchase
+        updateParams: BillingFlowParams.SubscriptionUpdateParams?,
+        offerId: String? = null
     ): BillingResult {
         val client = billingClient ?: throw IllegalStateException("BillingClient not initialized.")
 
@@ -169,26 +196,30 @@ class MobilePayments(private val activity: Activity) {
         val productDetails = getProductDetails(productId, productType) // Use the refactored method
 
         // 2. Build ProductDetailsParams (including offer token for SUBS)
-        val productDetailsParams = BillingFlowParams.ProductDetailsParams.newBuilder()
+        val productDetailsParamsBuilder = BillingFlowParams.ProductDetailsParams.newBuilder()
             .setProductDetails(productDetails)
-            .apply {
-                // Ensure we get the offer token for the *target* subscription plan
-                if (productType == ProductType.SUBS) {
-                    // Find the appropriate offer token. Often the first one or base plan.
-                    // You might need more logic here if you have multiple offers per subscription.
-                    productDetails.subscriptionOfferDetails?.firstOrNull()?.offerToken?.let { offerToken ->
-                        setOfferToken(offerToken)
-                    } ?: run {
-                         // Handle case where subscription details exist but no offer token found (might be an issue)
-                         System.err.println("Warning: No offer token found for subscription product $productId")
-                    }
+
+        if (productType == ProductType.SUBS) {
+            val offers = productDetails.subscriptionOfferDetails
+            if (!offers.isNullOrEmpty()) {
+                val targetOffer = if (offerId != null) {
+                    offers.firstOrNull { it.offerId == offerId }
+                        ?: throw IllegalStateException("Offer ID '$offerId' not found for product $productId")
+                } else {
+                    // If no offerId is passed, try to find the Base Plan (which has a null offerId)
+                    // This prevents accidentally giving a free trial if you just wanted to charge full price.
+                    offers.firstOrNull { it.offerId == null } ?: offers.first()
                 }
+
+                productDetailsParamsBuilder.setOfferToken(targetOffer.offerToken)
+            } else {
+                System.err.println("Warning: No offers found for subscription product $productId")
             }
-            .build()
+        }
 
         // 3. Build BillingFlowParams
         val billingFlowParamsBuilder = BillingFlowParams.newBuilder()
-            .setProductDetailsParamsList(listOf(productDetailsParams))
+            .setProductDetailsParamsList(listOf(productDetailsParamsBuilder.build()))
             .apply {
                 obfuscatedAccountId?.let { setObfuscatedAccountId(it) }
                 // Add update parameters ONLY if this is an upgrade/downgrade

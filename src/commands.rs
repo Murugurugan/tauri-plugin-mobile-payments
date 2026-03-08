@@ -87,7 +87,18 @@ pub(crate) async fn start_connection<R: Runtime>(app: AppHandle<R>) -> Result<()
 
 #[command]
 pub(crate) async fn purchase<R: Runtime>(app: AppHandle<R>, args: PurchaseRequest) -> Result<()> {
-    app.mobile_payments().purchase(args).await
+    #[cfg(target_os = "android")]
+    {
+        // Actually call the Kotlin plugin
+        app.mobile_payments().purchase(args).await
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        // Safely tell the Svelte frontend this isn't supported, 
+        // without crashing the whole Desktop app!
+        Err(crate::Error::PluginError("In-App Purchases are only supported on Android.".to_string()))
+    }
 }
 
 #[command]
@@ -122,7 +133,23 @@ pub(crate) async fn check_for_app_update<R: Runtime>(
     app: AppHandle<R>,
     args: UpdateCheckArgs
 ) -> Result<UpdateCheck> {
-    app.mobile_payments().check_for_app_update(args).await
+    #[cfg(target_os = "android")]
+    {
+        app.mobile_payments().check_for_app_update(args).await
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        // On desktop, pretend there is never a Google Play update.
+        Ok(UpdateCheck {
+            update_available: false,
+            available_version_code: None,
+            staleness_days: None,
+            priority: None,
+            is_immediate_allowed: Some(false),
+            is_flexible_allowed: Some(false),
+        })
+    }
 }
 
 #[command]

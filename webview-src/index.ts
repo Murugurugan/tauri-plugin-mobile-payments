@@ -19,26 +19,9 @@ export const enum SubscriptionReplacementMode {
 }
 
 
+
 export async function getSecureIdentity(): Promise<AuthPayload> {
-    // 1. Call your Rust command to get the UUID/Nonce
-    const rustPayload = await invoke<{platform: string, device_id: string, nonce?: string}>('plugin:identity|get_auth_payload');
-
-    let token = null;
-
-    // 2. If Rust says we are on Android, call the Kotlin command
-    if (rustPayload.platform === "android" && rustPayload.nonce) {
-        // Notice we call the Kotlin function `getIntegrityToken` defined in IdentityPlugin.kt
-        token = await invoke<string>('plugin:identity|getIntegrityToken', { 
-            nonce: rustPayload.nonce 
-        });
-    }
-
-    // 3. Return the unified payload to Svelte
-    return {
-        platform: rustPayload.platform,
-        deviceId: rustPayload.device_id,
-        integrityToken: token
-    };
+    return await invoke<AuthPayload>('plugin:mobile-payments|get_auth_payload');
 }
 
 export async function startConnection() {

@@ -19,16 +19,31 @@ pub(crate) async fn get_auth_payload<R: Runtime>(app: AppHandle<R>) -> Result<Au
     // ==========================================
     #[cfg(target_os = "android")]
     {
-        // 1. Generate UUID
-        let uuid = Uuid::new_v4().to_string();
+        use std::fs;
+        use tauri::Manager; // Ensures app.path() is available
 
-        // 2. Hash for Nonce
+        // 1. Get the sandboxed Android internal storage directory
+        let data_dir = app.path().app_local_data_dir().map_err(|e| crate::Error::PluginError(e.to_string()))?;
+        let uuid_file = data_dir.join("installation_id.txt"); // Renamed to sound less scary
+
+        // 2. Read existing UUID or create a new one
+        let uuid = if uuid_file.exists() {
+            fs::read_to_string(&uuid_file).unwrap_or_else(|_| Uuid::new_v4().to_string())
+        } else {
+            let new_uuid = Uuid::new_v4().to_string();
+            // Ensure directory exists, then save the UUID
+            let _ = fs::create_dir_all(&data_dir);
+            let _ = fs::write(&uuid_file, &new_uuid);
+            new_uuid
+        };
+
+        // 3. Hash for Nonce
         let mut hasher = Sha256::new();
         hasher.update(uuid.as_bytes());
         let hash_result = hasher.finalize();
         let nonce = URL_SAFE_NO_PAD.encode(hash_result);
 
-        // 3. Call Kotlin (via lib.rs helper function)
+        // 4. Call Kotlin 
         let token = app.mobile_payments().get_integrity_token(nonce).await?;
 
         Ok(AuthPayload {
@@ -69,7 +84,10 @@ pub(crate) async fn get_auth_payload<R: Runtime>(app: AppHandle<R>) -> Result<Au
         let combined = format!("{}-{}", hw_id, secret_uuid);
         let mut hasher = Sha256::new();
         hasher.update(combined.as_bytes());
-        let fingerprint = format!("{:x}", hasher.finalize());
+        let fingerprint = hasher.finalize()
+            .iter()
+            .map(|byte| format!("{:02x}", byte))
+            .collect::<String>();
 
         Ok(AuthPayload {
             platform: "desktop".to_string(),
@@ -83,6 +101,11 @@ pub(crate) async fn get_auth_payload<R: Runtime>(app: AppHandle<R>) -> Result<Au
 #[command]
 pub(crate) async fn start_connection<R: Runtime>(app: AppHandle<R>) -> Result<()> {
     app.mobile_payments().start_connection().await
+}
+
+#[command]
+pub(crate) async fn end_connection<R: Runtime>(app: AppHandle<R>) -> Result<()> {
+    app.mobile_payments().end_connection().await
 }
 
 #[command]

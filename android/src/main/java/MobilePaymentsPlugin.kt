@@ -240,13 +240,14 @@ class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun init(invoke: Invoke) {
+        println("DEBUG: Kotlin init command received!")
         executeVoidCommand(invoke) {
             val args = invoke.parseArgs(InitArgs::class.java)
-            implementation.init(
-                args.alternative_billing_only
-            )
+            implementation.init(args.alternative_billing_only)
+            println("DEBUG: Kotlin init completed successfully!")
         }
     }
+
 
     @Command
     fun setEventHandler(invoke: Invoke) {
@@ -260,6 +261,13 @@ class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
     fun startConnection(invoke: Invoke) {
         executeSuspendingVoidCommand(invoke) {
             implementation.startConnection()
+        }
+    }
+
+    @Command
+    fun endConnection(invoke: Invoke) {
+        executeVoidCommand(invoke) {
+            implementation.endConnection()
         }
     }
 

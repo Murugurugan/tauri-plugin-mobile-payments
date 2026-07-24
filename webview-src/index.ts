@@ -25,7 +25,21 @@ export async function getSecureIdentity(): Promise<AuthPayload> {
 }
 
 export async function startConnection() {
-    await invoke('plugin:mobile-payments|start_connection', {})
+    try {
+        await invoke('plugin:mobile-payments|start_connection');
+    } catch (e) {
+        // console.warn("startConnection: Not supported on this platform.");
+        console.error("CRITICAL startConnection ERROR:", e); 
+        throw e; 
+    }
+}
+
+export async function endConnection() {
+    try {
+        await invoke('plugin:mobile-payments|end_connection');
+    } catch (e) {
+        console.warn("endConnection: Not supported on this platform.");
+    }
 }
 
 export async function purchase(args: PurchaseRequest) {
@@ -36,8 +50,12 @@ export async function getProductPrice(args: ProductPriceRequest) {
     return await invoke<ProductDetail>('plugin:mobile-payments|get_product_price', {args})
 }
 
-export function listenForPurchases(handler: EventCallback<PaymentEvent>): Promise<UnlistenFn> {
+export function listenForPurchases(handler: EventCallback<any>): Promise<UnlistenFn> {
     return listen("mobile-payments://event", handler);
+}
+
+export function listenForUpdateEvents(handler: EventCallback<UpdateProgress | Record<string, unknown>>): Promise<UnlistenFn> {
+    return listen("mobile-payments://update", handler);
 }
 
 export async function updateSubscription(args: {
@@ -58,12 +76,17 @@ export async function updateSubscription(args: {
 }
 
 export async function getActiveSubscriptionPurchaseToken(productId: string): Promise<string | null> {
-    const result = await invoke<{ purchaseToken: string | null }>(
-        'plugin:mobile-payments|get_active_subscription_purchase_token',
-        { args: { productId } }
-    );
-    return result.purchaseToken ?? null;
+    try {
+        const result = await invoke<{ purchaseToken: string | null }>(
+            'plugin:mobile-payments|get_active_subscription_purchase_token',
+            { args: { productId } }
+        );
+        return result.purchaseToken ?? null;
+    } catch (e) {
+        return null;
+    }
 }
+
 
 /** Runtime constants that mirror the union type. */
 // export const UpdateTypes = {
@@ -98,24 +121,14 @@ export async function completeFlexibleUpdate(): Promise<void> {
     await invoke("plugin:mobile-payments|complete_flexible_update");
 }
 
-/**
- * Listen for every native update-status change (progress bytes + status code).
- * The channel name mirrors what you used for purchases.
- *
- * Be sure to hold on to the returned `UnlistenFn` and call it in `onUnmount`.
- */
-export function listenForUpdateEvents(
-    handler: EventCallback<UpdateProgress | Record<string, unknown>>,
-): Promise<UnlistenFn> {
-    /* the channel is emitted from Kotlin’s `updates.setChannel()`              *
-    * and is identical to how you broadcast purchase events:                  */
-    return listen("mobile-payments://update", handler);
-}
+
+
 
 // export function createChannel<T>(
 //     callback: (payload: T) => void
 // ): Promise<Channel<T>>
 
+let updateChannel: Channel | null = null;
 
 /**
  * Register a callback that receives every progress / status message
@@ -126,18 +139,26 @@ export function listenForUpdateEvents(
 export async function registerUpdateEventHandler(
     callback: (data: UpdateProgress | Record<string, unknown>) => void
 ): Promise<() => void> {
+
+    if (updateChannel) {
+        updateChannel.onmessage = callback;
+        return () => {}; // Disposer
+    }
+
     // 1️⃣  Create a JS-side channel bound to your callback
-    const chan = new Channel(callback);
+    updateChannel = new Channel(callback);
 
     // 2️⃣  Give the channel object itself to Kotlin/Rust
     await invoke("plugin:mobile-payments|set_update_event_handler", {
-        handler: chan             // <-- just pass the Channel
+        handler: updateChannel             // <-- just pass the Channel
     });
 
     // 3️⃣  Return a simple disposer
     return () => {
-        // you can swap to a noop to stop receiving messages
-        chan.onmessage = () => {};
+        if (updateChannel) {
+            updateChannel.onmessage = () => {}; 
+            // In a real plugin, you might also want an "unset_handler" command
+        }
     };
 }
 

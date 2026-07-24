@@ -34,7 +34,7 @@ pub struct MobilePayments<R: Runtime> {
     handle: PluginHandle<R>,
     
     #[cfg(desktop)]
-    _marker: std::marker::PhantomData<R>,
+    _marker: std::marker::PhantomData<fn() -> R>,
 }
 
 #[derive(Deserialize)]
@@ -45,6 +45,17 @@ struct IntegrityResponse {
 // ==========================================
 // 2. IMPLEMENTATION
 // ==========================================
+
+
+impl<R: Runtime> Drop for MobilePayments<R> {
+    fn drop(&mut self) {
+        #[cfg(mobile)]
+        {
+            // When the Tauri app is killed, force Android to unbind the billing service
+            let _ = self.handle.run_mobile_plugin::<()>("endConnection", ());
+        }
+    }
+}
 
 impl<R: Runtime> MobilePayments<R> {
     
@@ -85,6 +96,18 @@ impl<R: Runtime> MobilePayments<R> {
             spawn_blocking({
                 let app = self.handle.clone();
                 move || app.run_mobile_plugin("startConnection", ()).map_err(Into::into)
+            }).await?
+        }
+        #[cfg(desktop)]
+        Ok(())
+    }
+
+    pub async fn end_connection(&self) -> crate::Result<()> {
+        #[cfg(mobile)]
+        {
+            spawn_blocking({
+                let app = self.handle.clone();
+                move || app.run_mobile_plugin("endConnection", ()).map_err(Into::into)
             }).await?
         }
         #[cfg(desktop)]
@@ -250,16 +273,17 @@ impl<R: Runtime, T: Manager<R>> crate::MobilePaymentsExt<R> for T {
 pub fn init<R: Runtime>(args: InitRequest) -> TauriPlugin<R> {
     Builder::new("mobile-payments")
         .invoke_handler(tauri::generate_handler![
-            commands::start_connection, 
-            commands::purchase, 
-            commands::get_product_price, 
-            commands::update_subscription, 
-            commands::get_active_subscription_purchase_token, 
-            commands::set_update_event_handler, 
-            commands::check_for_app_update, 
-            commands::start_app_update, 
-            commands::complete_flexible_update, 
-            commands::set_fullscreen, 
+            commands::start_connection,
+            commands::end_connection,
+            commands::purchase,
+            commands::get_product_price,
+            commands::update_subscription,
+            commands::get_active_subscription_purchase_token,
+            commands::set_update_event_handler,
+            commands::check_for_app_update,
+            commands::start_app_update,
+            commands::complete_flexible_update,
+            commands::set_fullscreen,
             commands::get_auth_payload
         ])
         .setup(|app, api| {
@@ -277,8 +301,9 @@ pub fn init<R: Runtime>(args: InitRequest) -> TauriPlugin<R> {
                     handler: Channel::new({
                         let app = app.clone();
                         move |event| {
-                            if let InvokeResponseBody::Json(json) = event {
-                                let _ = app.emit("mobile-payments://event", json);
+                            match event {
+                                InvokeResponseBody::Json(json) => { let _ = app.emit("mobile-payments://event", json); },
+                                _ => println!("Received non-JSON event from Mobile Payments Plugin"),
                             }
                             Ok(())
                         }
@@ -289,13 +314,15 @@ pub fn init<R: Runtime>(args: InitRequest) -> TauriPlugin<R> {
                     handler: Channel::new({
                         let app = app.clone();
                         move |event| {
-                            if let InvokeResponseBody::Json(json) = event {
-                                let _ = app.emit("mobile-payments://update", json);
+                            match event {
+                                InvokeResponseBody::Json(json) => { let _ = app.emit("mobile-payments://update", json); },
+                                _ => println!("Received non-JSON event from Mobile Updates Plugin"),
                             }
                             Ok(())
                         }
                     })
                 })?;
+
 
                 handle.run_mobile_plugin::<()>("init", args)?;
 
@@ -306,9 +333,10 @@ pub fn init<R: Runtime>(args: InitRequest) -> TauriPlugin<R> {
             #[cfg(desktop)]
             {
                 // Just register the state so commands don't crash when calling app.mobile_payments()
-                app.manage(MobilePayments { 
+                app.manage(MobilePayments::<R> { 
                     _marker: std::marker::PhantomData 
                 });
+
             }
 
             Ok(())

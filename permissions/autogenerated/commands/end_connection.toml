@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-end-connection"
+description = "Enables the end_connection command without any pre-configured scope."
+commands.allow = ["end_connection"]
+
+[[permission]]
+identifier = "deny-end-connection"
+description = "Denies the end_connection command without any pre-configured scope."
+commands.deny = ["end_connection"]

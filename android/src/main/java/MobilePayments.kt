@@ -41,6 +41,8 @@ private fun Purchase.toWire() = PurchaseWire(
     originalJson
 )
 
+private var isConnecting = false // Guard variable
+
 
 class MobilePayments(private val activity: Activity) {
     private var billingClient: BillingClient? = null
@@ -75,24 +77,75 @@ class MobilePayments(private val activity: Activity) {
     }
 
     suspend fun startConnection() {
-        billingClient?.let { client ->
+        // 1. ADD THIS BLOCK: Auto-initialize if it hasn't been done yet!
+        if (billingClient == null) {
+            println("MobilePayments: Auto-initializing BillingClient...")
+            init(false) 
+        }
+
+        if (billingClient?.isReady == true) return
+        if (isConnecting) return
+
+        val client = billingClient ?: throw IllegalStateException("BillingClient not initialized.")
+
+        isConnecting = true
+
+        try {
             suspendCancellableCoroutine<Unit> { continuation ->
                 client.startConnection(object : BillingClientStateListener {
                     override fun onBillingSetupFinished(billingResult: BillingResult) {
+                        isConnecting = false
                         if (billingResult.responseCode == BillingResponseCode.OK) {
+                            println("MobilePayments: Billing connected successfully!")
                             continuation.resume(Unit)
                         } else {
-                            continuation.cancel(CancellationException("Billing setup failed with response code: ${billingResult.responseCode}"))
+                            println("MobilePayments: Billing setup failed: ${billingResult.responseCode}")
+                            continuation.cancel(
+                                CancellationException(
+                                    "Billing setup failed: ${billingResult.responseCode}"
+                                )
+                            )
                         }
                     }
 
                     override fun onBillingServiceDisconnected() {
-                        // TODO: Implement retry logic or notify the rust side that we are disconnected.
+                        isConnecting = false
+                        println("MobilePayments: Billing service disconnected.")
+                        channel?.sendObject(
+                            mapOf(
+                                "isDisconnectError" to true,
+                                "message" to "Billing service disconnected."
+                            )
+                        )
                     }
                 })
             }
-        } ?: throw IllegalStateException("BillingClient not initialized.")
+        } catch (e: Exception) {
+            isConnecting = false // ALWAYS reset on any exception path
+            throw e
+        }
     }
+
+
+
+    fun endConnection() {
+        // 1. Check if it's already null to prevent redundant logic
+        val client = billingClient ?: return 
+
+        try {
+            // 2. Only call endConnection if it's currently connected or in a state to be closed
+            // Note: BillingClient handles its own internal state, so just calling it is usually safe.
+            client.endConnection()
+        } catch (e: Exception) {
+            // Logging is essential as you noted
+            println("Error during BillingClient cleanup: ${e.message}")
+        } finally {
+            // 3. Always nullify the reference so you can re-init() later
+            billingClient = null
+            channel = null
+        }
+    }
+
 
 
     suspend fun getActiveSubscriptionPurchaseToken(productId: String): String? {

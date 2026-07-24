@@ -6,6 +6,7 @@ Allows initiating payments and starting connections to google payments services
 
 - `allow-get-auth-payload`
 - `allow-start-connection`
+- `allow-end-connection`
 - `allow-purchase`
 - `allow-start-app-update`
 - `allow-set-update-event-handler`
@@ -70,6 +71,32 @@ Enables the complete_flexible_update command without any pre-configured scope.
 <td>
 
 Denies the complete_flexible_update command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`mobile-payments:allow-end-connection`
+
+</td>
+<td>
+
+Enables the end_connection command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`mobile-payments:deny-end-connection`
+
+</td>
+<td>
+
+Denies the end_connection command without any pre-configured scope.
 
 </td>
 </tr>

@@ -41,8 +41,7 @@ private fun Purchase.toWire() = PurchaseWire(
     originalJson
 )
 
-private var isConnecting = false // Guard variable
-
+private var isConnecting = false 
 
 class MobilePayments(private val activity: Activity) {
     private var billingClient: BillingClient? = null
@@ -59,15 +58,26 @@ class MobilePayments(private val activity: Activity) {
                     mapOf(
                         "billingResult" to mapOf(
                             "responseCode" to billingResult.responseCode,
+                            "subResponseCode" to billingResult.subResponseCode, // NEW IN PBL 9
                             "debugMessage" to billingResult.debugMessage
                         ),
                         "purchases" to purchases.orEmpty().map { it.toWire() }
                     )
                 )
             }
-            enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())
+            // PBL 9 required pending purchases params format
+            enablePendingPurchases(
+                PendingPurchasesParams.newBuilder()
+                    .enableOneTimeProducts()
+                    .build()
+            )
+            
             if (enableAlternativeBillingOnly) {
-                enableAlternativeBillingOnly()
+                // Note: Alternative Billing Only in PBL 8/9 requires setting setAlternativeBillingOnlyListener.
+                // Parameterless enableAlternativeBillingOnly() was removed in PBL 9.
+                setAlternativeBillingOnlyListener { details ->
+                    // Handle alternative billing reporting if needed
+                }
             }
         }.build()
     }
@@ -77,7 +87,6 @@ class MobilePayments(private val activity: Activity) {
     }
 
     suspend fun startConnection() {
-        // 1. ADD THIS BLOCK: Auto-initialize if it hasn't been done yet!
         if (billingClient == null) {
             println("MobilePayments: Auto-initializing BillingClient...")
             init(false) 
@@ -99,7 +108,7 @@ class MobilePayments(private val activity: Activity) {
                             println("MobilePayments: Billing connected successfully!")
                             continuation.resume(Unit)
                         } else {
-                            println("MobilePayments: Billing setup failed: ${billingResult.responseCode}")
+                            println("MobilePayments: Billing setup failed: ${billingResult.responseCode}, SubCode: ${billingResult.subResponseCode}")
                             continuation.cancel(
                                 CancellationException(
                                     "Billing setup failed: ${billingResult.responseCode}"
@@ -121,32 +130,23 @@ class MobilePayments(private val activity: Activity) {
                 })
             }
         } catch (e: Exception) {
-            isConnecting = false // ALWAYS reset on any exception path
+            isConnecting = false 
             throw e
         }
     }
 
-
-
     fun endConnection() {
-        // 1. Check if it's already null to prevent redundant logic
         val client = billingClient ?: return 
 
         try {
-            // 2. Only call endConnection if it's currently connected or in a state to be closed
-            // Note: BillingClient handles its own internal state, so just calling it is usually safe.
             client.endConnection()
         } catch (e: Exception) {
-            // Logging is essential as you noted
             println("Error during BillingClient cleanup: ${e.message}")
         } finally {
-            // 3. Always nullify the reference so you can re-init() later
             billingClient = null
             channel = null
         }
     }
-
-
 
     suspend fun getActiveSubscriptionPurchaseToken(productId: String): String? {
         val client = billingClient ?: throw IllegalStateException("BillingClient not initialized.")
@@ -161,14 +161,12 @@ class MobilePayments(private val activity: Activity) {
                     continuation.resumeWith(Result.failure(IllegalStateException("Failed to query purchases: ${billingResult.debugMessage}")))
                     return@queryPurchasesAsync
                 }
-                // Find the purchase for the given productId
+                
                 val token = purchasesList.firstOrNull { it.products.contains(productId) }?.purchaseToken
                 continuation.resume(token)
             }
         }
     }
-
-
 
     suspend fun getProductDetails(productId: String, productType: String): ProductDetails {
         val client = billingClient ?: throw IllegalStateException("BillingClient not initialized.")
@@ -192,11 +190,8 @@ class MobilePayments(private val activity: Activity) {
     }
 
     fun extractPriceInfo(productDetails: ProductDetails, offerId: String? = null): PriceInfo {
-        // For Subscriptions
         productDetails.subscriptionOfferDetails?.let { offers ->
-            
             val targetOffer = if (offerId != null) {
-                // FIX: Throw an error if the specific offer requested is not found
                 offers.firstOrNull { it.offerId == offerId }
                     ?: throw IllegalStateException("Offer ID '$offerId' not found or ineligible for product ${productDetails.productId}")
             } else {
@@ -205,7 +200,6 @@ class MobilePayments(private val activity: Activity) {
 
             targetOffer?.let { offer ->
                 val phases = offer.pricingPhases.pricingPhaseList
-                
                 val firstPhase = phases.firstOrNull()
                 val lastPhase = phases.lastOrNull()
 
@@ -226,16 +220,13 @@ class MobilePayments(private val activity: Activity) {
             }
         }
 
-        // For One-Time Purchases
         productDetails.oneTimePurchaseOfferDetails?.let { offer ->
              return PriceInfo(offer.formattedPrice, null, offer.priceCurrencyCode, offer.priceAmountMicros)
         }
 
-        // FIX: If it gets here and was looking for a sub, it failed.
         throw IllegalStateException("Failed to extract price info for ${productDetails.productId}")
     }
 
-    // --- Consolidate purchase flow logic ---
     suspend fun launchPurchaseFlow(
         productId: String,
         productType: String,
@@ -245,10 +236,8 @@ class MobilePayments(private val activity: Activity) {
     ): BillingResult {
         val client = billingClient ?: throw IllegalStateException("BillingClient not initialized.")
 
-        // 1. Get ProductDetails for the product being purchased/updated TO
-        val productDetails = getProductDetails(productId, productType) // Use the refactored method
+        val productDetails = getProductDetails(productId, productType) 
 
-        // 2. Build ProductDetailsParams (including offer token for SUBS)
         val productDetailsParamsBuilder = BillingFlowParams.ProductDetailsParams.newBuilder()
             .setProductDetails(productDetails)
 
@@ -259,8 +248,6 @@ class MobilePayments(private val activity: Activity) {
                     offers.firstOrNull { it.offerId == offerId }
                         ?: throw IllegalStateException("Offer ID '$offerId' not found for product $productId")
                 } else {
-                    // If no offerId is passed, try to find the Base Plan (which has a null offerId)
-                    // This prevents accidentally giving a free trial if you just wanted to charge full price.
                     offers.firstOrNull { it.offerId == null } ?: offers.first()
                 }
 
@@ -270,53 +257,29 @@ class MobilePayments(private val activity: Activity) {
             }
         }
 
-        // 3. Build BillingFlowParams
         val billingFlowParamsBuilder = BillingFlowParams.newBuilder()
             .setProductDetailsParamsList(listOf(productDetailsParamsBuilder.build()))
             .apply {
                 obfuscatedAccountId?.let { setObfuscatedAccountId(it) }
-                // Add update parameters ONLY if this is an upgrade/downgrade
                 updateParams?.let { setSubscriptionUpdateParams(it) }
             }
 
         val billingFlowParams = billingFlowParamsBuilder.build()
 
-        // 4. Launch Billing Flow
         return client.launchBillingFlow(activity, billingFlowParams)
     }
 
-    suspend fun purchase(productId: String, productType: String, obfuscatedAccountId: String?): BillingResult {
-        billingClient?.let { client ->
-            val productList = listOf(
-                QueryProductDetailsParams.Product.newBuilder().setProductId(productId).setProductType(productType)
-                    .build()
-            )
-
-            val params = QueryProductDetailsParams.newBuilder().setProductList(productList).build()
-
-            val productsDetails = client.queryProductDetails(params)
-
-            if (productsDetails.billingResult.responseCode != BillingResponseCode.OK) {
-                throw IllegalStateException("Billing response code: ${productsDetails.billingResult.responseCode}")
-            }
-
-            val productDetailsList =
-                productsDetails.productDetailsList ?: throw IllegalStateException("Product details list is empty.")
-
-            val productDetailsParamsList = productDetailsList.map { productDetails ->
-                BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(productDetails).apply {
-                    if (productType == ProductType.SUBS) {
-                        productDetails.subscriptionOfferDetails?.firstOrNull()?.offerToken?.let { setOfferToken(it) }
-                    }
-                }.build()
-            }
-
-            val billingFlowParams =
-                BillingFlowParams.newBuilder().setProductDetailsParamsList(productDetailsParamsList).apply {
-                    obfuscatedAccountId?.let { setObfuscatedAccountId(it) }
-                }.build()
-
-            return client.launchBillingFlow(activity, billingFlowParams)
-        } ?: throw IllegalStateException("BillingClient not initialized.")
+    suspend fun purchase(
+        productId: String, 
+        productType: String, 
+        obfuscatedAccountId: String?
+    ): BillingResult {
+        return launchPurchaseFlow(
+            productId = productId,
+            productType = productType,
+            obfuscatedAccountId = obfuscatedAccountId,
+            updateParams = null,
+            offerId = null
+        )
     }
 }

@@ -107,12 +107,13 @@ struct Purchase {
   pub skus: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 #[tsync]
-struct BillingResult {
+pub struct BillingResult {
   pub debug_message: String,
   pub response_code: i64,
+  pub sub_response_code: Option<i64>, // Added for PBL 9 support
 }
 
 #[derive(Serialize, Deserialize)]

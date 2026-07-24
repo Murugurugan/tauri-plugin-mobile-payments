@@ -4,6 +4,11 @@ import type { UpdateType as UpdateTypeT, UpdateProgress, UpdateCheck } from "./b
 
 import {EventCallback, listen, UnlistenFn} from "@tauri-apps/api/event";
 
+export const enum BillingSubResponseCode {
+    NO_APPLICABLE_SUB_RESPONSE_CODE = 0,
+    PAYMENT_DECLINED_DUE_TO_INSUFFICIENT_FUNDS = 1,
+    USER_INELIGIBLE = 2,
+}
 
 export const enum SubscriptionReplacementMode {
     /** The replacement takes effect immediately, and the remaining time will be prorated and credited to the user. */
@@ -166,6 +171,8 @@ export const UpdateType = {
     IMMEDIATE: "IMMEDIATE",
     FLEXIBLE:  "FLEXIBLE",
 } as const satisfies Record<UpdateTypeT, UpdateTypeT>;
+
+
 
 export type UpdateType = UpdateTypeT;
 

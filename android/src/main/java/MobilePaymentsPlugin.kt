@@ -67,11 +67,7 @@ class PurchaseArgs {
     lateinit var isSub: String
     var obfuscatedAccountId: String? = null
     var offerId: String? = null
-}
-
-@InvokeArg
-class SetEventHandlerArgs {
-    lateinit var handler: Channel
+    var basePlanId: String? = null
 }
 
 @InvokeArg
@@ -79,6 +75,12 @@ class ProductListArgs {
     lateinit var productId: String
     lateinit var sub: String
     var offerId: String? = null
+    var basePlanId: String? = null
+}
+
+@InvokeArg
+class SetEventHandlerArgs {
+    lateinit var handler: Channel
 }
 
 @InvokeArg
@@ -275,14 +277,15 @@ class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
     fun purchase(invoke: Invoke) {
         executeSuspendingVoidCommand(invoke) {
             val args = invoke.parseArgs(PurchaseArgs::class.java)
-            // Ensure productType is correctly determined (SUBS or INAPP)
+            
             val productType = if (args.isSub.toBoolean()) BillingClient.ProductType.SUBS else BillingClient.ProductType.INAPP
             implementation.launchPurchaseFlow(
                 productId = args.productId,
                 productType = productType,
                 obfuscatedAccountId = args.obfuscatedAccountId,
                 updateParams = null,
-                offerId = args.offerId
+                offerId = args.offerId,
+                basePlanId = args.basePlanId
             )
         }
     }
@@ -326,7 +329,11 @@ class MobilePaymentsPlugin(private val activity: Activity) : Plugin(activity) {
             val productType = if (args.sub.toBoolean()) BillingClient.ProductType.SUBS else BillingClient.ProductType.INAPP
             val productDetails = implementation.getProductDetails(args.productId, productType)
 
-            val priceInfo = implementation.extractPriceInfo(productDetails, args.offerId) 
+            val priceInfo = implementation.extractPriceInfo(
+                productDetails,
+                args.offerId,
+                args.basePlanId
+            ) 
 
             return@executeSuspendingCommand JSObject().apply {
                 put("formattedPrice", priceInfo.formattedPrice)

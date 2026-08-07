@@ -47,6 +47,16 @@ class MobilePayments(private val activity: Activity) {
     private var billingClient: BillingClient? = null
     private var channel: Channel? = null
 
+    // Safe helper to extract subResponseCode without compiler issues
+    private fun extractSubResponseCode(billingResult: BillingResult): Int {
+        return try {
+            val method = billingResult.javaClass.getMethod("getSubResponseCode")
+            (method.invoke(billingResult) as? Int) ?: 0
+        } catch (e: Exception) {
+            0
+        }
+    }
+
     fun init(enableAlternativeBillingOnly: Boolean) {
         billingClient?.let {
             throw IllegalStateException("BillingClient already initialized")
@@ -58,27 +68,28 @@ class MobilePayments(private val activity: Activity) {
                     mapOf(
                         "billingResult" to mapOf(
                             "responseCode" to billingResult.responseCode,
-                            "subResponseCode" to billingResult.subResponseCode, // NEW IN PBL 9
+                            "subResponseCode" to extractSubResponseCode(billingResult),
                             "debugMessage" to billingResult.debugMessage
                         ),
-                        "purchases" to purchases.orEmpty().map { it.toWire() }
+                        "purchases" to purchases.orEmpty().map { p ->
+                            mapOf(
+                                "orderId" to p.orderId,
+                                "packageName" to p.packageName,
+                                "products" to p.products,
+                                "purchaseToken" to p.purchaseToken,
+                                "purchaseTime" to p.purchaseTime,
+                                "acknowledged" to p.isAcknowledged,
+                                "originalJson" to p.originalJson
+                            )
+                        }
                     )
                 )
             }
-            // PBL 9 required pending purchases params format
             enablePendingPurchases(
                 PendingPurchasesParams.newBuilder()
                     .enableOneTimeProducts()
                     .build()
             )
-            
-            if (enableAlternativeBillingOnly) {
-                // Note: Alternative Billing Only in PBL 8/9 requires setting setAlternativeBillingOnlyListener.
-                // Parameterless enableAlternativeBillingOnly() was removed in PBL 9.
-                setAlternativeBillingOnlyListener { details ->
-                    // Handle alternative billing reporting if needed
-                }
-            }
         }.build()
     }
 
@@ -108,7 +119,7 @@ class MobilePayments(private val activity: Activity) {
                             println("MobilePayments: Billing connected successfully!")
                             continuation.resume(Unit)
                         } else {
-                            println("MobilePayments: Billing setup failed: ${billingResult.responseCode}, SubCode: ${billingResult.subResponseCode}")
+                            println("MobilePayments: Billing setup failed: ${billingResult.responseCode}")
                             continuation.cancel(
                                 CancellationException(
                                     "Billing setup failed: ${billingResult.responseCode}"
@@ -189,14 +200,24 @@ class MobilePayments(private val activity: Activity) {
             ?: throw IllegalStateException("Product details not found for ID: $productId")
     }
 
-    fun extractPriceInfo(productDetails: ProductDetails, offerId: String? = null): PriceInfo {
+    fun extractPriceInfo(
+        productDetails: ProductDetails, 
+        offerId: String? = null,
+        basePlanId: String? = null
+    ): PriceInfo {
         productDetails.subscriptionOfferDetails?.let { offers ->
-            val targetOffer = if (offerId != null) {
-                offers.firstOrNull { it.offerId == offerId }
-                    ?: throw IllegalStateException("Offer ID '$offerId' not found or ineligible for product ${productDetails.productId}")
-            } else {
-                offers.firstOrNull { it.offerId == null } ?: offers.firstOrNull()
-            }
+            // Match both basePlanId and offerId
+            val targetOffer = offers.firstOrNull { offer ->
+                val matchesBasePlan = basePlanId == null || offer.basePlanId == basePlanId
+                val matchesOffer = if (offerId != null) {
+                    offer.offerId == offerId
+                } else {
+                    offer.offerId == null
+                }
+                matchesBasePlan && matchesOffer
+            } ?: offers.firstOrNull { offer ->
+                basePlanId == null || offer.basePlanId == basePlanId
+            } ?: offers.firstOrNull()
 
             targetOffer?.let { offer ->
                 val phases = offer.pricingPhases.pricingPhaseList
@@ -232,7 +253,8 @@ class MobilePayments(private val activity: Activity) {
         productType: String,
         obfuscatedAccountId: String?,
         updateParams: BillingFlowParams.SubscriptionUpdateParams?,
-        offerId: String? = null
+        offerId: String? = null,
+        basePlanId: String? = null
     ): BillingResult {
         val client = billingClient ?: throw IllegalStateException("BillingClient not initialized.")
 
@@ -244,12 +266,18 @@ class MobilePayments(private val activity: Activity) {
         if (productType == ProductType.SUBS) {
             val offers = productDetails.subscriptionOfferDetails
             if (!offers.isNullOrEmpty()) {
-                val targetOffer = if (offerId != null) {
-                    offers.firstOrNull { it.offerId == offerId }
-                        ?: throw IllegalStateException("Offer ID '$offerId' not found for product $productId")
-                } else {
-                    offers.firstOrNull { it.offerId == null } ?: offers.first()
-                }
+                // Match both basePlanId and offerId
+                val targetOffer = offers.firstOrNull { offer ->
+                    val matchesBasePlan = basePlanId == null || offer.basePlanId == basePlanId
+                    val matchesOffer = if (offerId != null) {
+                        offer.offerId == offerId
+                    } else {
+                        offer.offerId == null
+                    }
+                    matchesBasePlan && matchesOffer
+                } ?: offers.firstOrNull { offer ->
+                    basePlanId == null || offer.basePlanId == basePlanId
+                } ?: offers.first()
 
                 productDetailsParamsBuilder.setOfferToken(targetOffer.offerToken)
             } else {
@@ -267,19 +295,5 @@ class MobilePayments(private val activity: Activity) {
         val billingFlowParams = billingFlowParamsBuilder.build()
 
         return client.launchBillingFlow(activity, billingFlowParams)
-    }
-
-    suspend fun purchase(
-        productId: String, 
-        productType: String, 
-        obfuscatedAccountId: String?
-    ): BillingResult {
-        return launchPurchaseFlow(
-            productId = productId,
-            productType = productType,
-            obfuscatedAccountId = obfuscatedAccountId,
-            updateParams = null,
-            offerId = null
-        )
     }
 }

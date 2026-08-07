@@ -31,7 +31,18 @@ pub struct PurchaseRequest {
   pub product_id: String,
   pub is_sub: bool,
   pub obfuscated_account_id: Option<String>,
-  pub offer_id: Option<String>
+  pub offer_id: Option<String>,
+  pub base_plan_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[tsync]
+pub struct ProductPriceRequest {
+  pub product_id: String,
+  pub sub: bool,
+  pub offer_id: Option<String>,
+  pub base_plan_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -43,15 +54,6 @@ pub struct UpdateSubscriptionRequest {
     // #[tsync(optional)] // Make optional in TS if default is handled in Kotlin/JS
     pub replacement_mode: Option<String>, // e.g., "IMMEDIATE_WITH_TIME_PRORATION", "DEFERRED"
     pub obfuscated_account_id: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[tsync]
-pub struct ProductPriceRequest {
-  pub product_id: String,
-  pub sub: bool,
-  pub offer_id: Option<String>
 }
 
 #[derive(Serialize)]
